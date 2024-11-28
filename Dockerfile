@@ -10,4 +10,6 @@ COPY --chown=deno:deno [".", "/app/"]
 
 RUN deno cache main.ts
 
+ENV DENO_ENV=production
+
 CMD ["task", "start"]
