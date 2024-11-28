@@ -42,7 +42,7 @@ for (const repo of repos) {
 
 		console.log('cloning', repo.name)
 		const clone = await exec('git', {
-			args: ['clone', url.toString(), '.'],
+			args: ['clone', /*'--origin', 'github',*/ url.toString(), '.'],
 			cwd: directory,
 		})
 
@@ -52,7 +52,7 @@ for (const repo of repos) {
 	} else if (stat.isDirectory) {
 		console.log('---- pulling ----')
 		const pull = await exec('git', {
-			args: ['pull'],
+			args: ['pull' /*, 'github'*/],
 			cwd: directory,
 		})
 		if (!pull.ok) {
@@ -68,7 +68,7 @@ for (const repo of repos) {
 		appConfig.target.template.replace('{repo}', repo.name),
 	).toString()
 
-	console.log('---- adding remote ----', remoteUrl)
+	console.log('---- adding remote ----')
 	await exec('git', {
 		args: ['remote', 'remove', remoteName],
 		cwd: directory,
