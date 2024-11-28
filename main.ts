@@ -30,27 +30,39 @@ for (const repo of repos) {
 	console.log('\n\n==== %s ====', repo.name)
 
 	const directory = `${reposDir}/${repo.name}`
-	const stat = await Deno.stat(directory).catch(() => null)
+	const stat = await Deno.stat(`${directory}/.git`).catch((error) => {
+		console.error(error)
+		return null
+	})
 
-	if (!stat?.isDirectory) {
+	if (!stat) {
 		console.log('---- cloning ----')
 		const url = new URL(repo.clone_url)
 		url.username = appConfig.github.username
 		url.password = appConfig.github.token
 
-		await Deno.mkdir(reposDir, { recursive: true })
+		await Deno.mkdir(directory, { recursive: true })
 
 		console.log('cloning', repo.name)
-		await exec('git', {
+		const clone = await exec('git', {
 			args: ['clone', url.toString(), '.'],
 			cwd: directory,
 		})
-	} else {
+
+		if (!clone.ok) {
+			throw new Error('Failed to clone ' + url.toString())
+		}
+	} else if (stat.isDirectory) {
 		console.log('---- pulling ----')
-		await exec('git', {
+		const pull = await exec('git', {
 			args: ['pull'],
 			cwd: directory,
 		})
+		if (!pull.ok) {
+			throw new Error('Failed to pull ' + directory)
+		}
+	} else {
+		throw new Error('Unknown repo ' + directory)
 	}
 
 	// Add backup remote

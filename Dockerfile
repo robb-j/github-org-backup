@@ -12,4 +12,4 @@ RUN deno cache main.ts
 
 ENV DENO_ENV=production
 
-CMD ["task", "start"]
+CMD ["deno", "run", "--allow-env", "--allow-read=.", "--allow-write=repos", "--allow-net=api.github.com:443", "--allow-run=git", "main.ts"]
