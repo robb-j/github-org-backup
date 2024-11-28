@@ -30,10 +30,7 @@ for (const repo of repos) {
 	console.log('\n\n==== %s ====', repo.name)
 
 	const directory = `${reposDir}/${repo.name}`
-	const stat = await Deno.stat(`${directory}/.git`).catch((error) => {
-		console.error(error)
-		return null
-	})
+	const stat = await Deno.stat(`${directory}/.git`).catch(() => null)
 
 	if (!stat) {
 		console.log('---- cloning ----')
