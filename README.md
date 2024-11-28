@@ -10,7 +10,7 @@ server. Works well with create-on-push git servers like Gitea & GitLab.
 ```bash
 # cd to/this/folder
 
-git clone THIS_REPO
+git clone git@github.com:robb-j/github-org-backup.git
 
 # Get configuration usage and current values
 # > See the permissions used at the top of the config.ts
