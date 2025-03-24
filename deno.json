@@ -4,8 +4,8 @@
 		"start": "main.ts"
 	},
 	"imports": {
-		"octokit": "https://esm.sh/octokit@4.0.2?dts",
-		"gruber": "https://esm.r0b.io/gruber@0.5.0/mod.ts"
+		"octokit": "https://esm.sh/octokit@4.1.2?dts",
+		"gruber": "https://esm.r0b.io/gruber@0.7.0/mod.ts"
 	},
 	"fmt": {
 		"singleQuote": true,

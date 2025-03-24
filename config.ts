@@ -1,8 +1,8 @@
 #!/usr/bin/env deno run --env --allow-env --allow-read=app-config.json
 
-import { getDenoConfiguration } from 'gruber'
+import { getConfiguration } from 'gruber'
 
-const config = getDenoConfiguration()
+const config = getConfiguration()
 
 const AppConfig = config.object({
 	env: config.string({ variable: 'DENO_ENV', fallback: 'development' }),
