@@ -125,6 +125,7 @@ async function main() {
 
 	let exitCode = 0
 	const failures: Repo[] = []
+	const tolerations = new Set(appConfig.tolerations)
 
 	for (const repo of repos) {
 		try {
@@ -133,7 +134,10 @@ async function main() {
 			failures.push(repo)
 			console.error('FAILURE: %s', repo.name)
 			console.error(error)
-			exitCode = 1
+
+			if (!tolerations.has(repo.name)) {
+				exitCode = 1
+			}
 		}
 	}
 

@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.5
+
+- Add "tolerations" to allow some repos to fail
+
 ## 0.1.4
 
 - Fix Octokit dependency

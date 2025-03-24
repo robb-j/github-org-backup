@@ -1,6 +1,6 @@
 #!/usr/bin/env deno run --env --allow-env --allow-read=app-config.json
 
-import { getConfiguration } from 'gruber'
+import { getConfiguration, StructError, Structure } from 'gruber'
 
 const config = getConfiguration()
 
@@ -23,6 +23,9 @@ const AppConfig = config.object({
 			fallback: 'https://example.com/organisation/{repo}.git',
 		}),
 	}),
+	tolerations: config.array(
+		Structure.string(),
+	),
 })
 
 export const appConfig = await config.load(
