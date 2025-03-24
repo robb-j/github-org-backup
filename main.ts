@@ -2,7 +2,7 @@
 
 import { Octokit } from 'octokit'
 import { appConfig } from './config.ts'
-import { exec } from './lib.ts'
+import { exec, getRemotes } from './lib.ts'
 
 interface Repo {
 	name: string
@@ -19,72 +19,131 @@ const repos = await octokit.paginate<Repo>(`GET /orgs/{org}/repos`, {
 	headers: { 'X-GitHub-Api-Version': '2022-11-28' },
 })
 
-const reposDir = 'repos'
+const GITHUB_REMOTE = 'origin'
+const BACKUP_REMOTE = 'backup'
+const REPOS_DIR = 'repos'
 
-for (const repo of repos) {
-	if (Deno.args.includes('--list')) {
-		console.log(repo.name)
-		continue
-	}
-
+async function backup(repo: Repo) {
 	console.log('\n\n==== %s ====', repo.name)
 
-	const directory = `${reposDir}/${repo.name}`
+	const directory = `${REPOS_DIR}/${repo.name}`
 	const stat = await Deno.stat(`${directory}/.git`).catch(() => null)
+
+	const githubRemote = new URL(repo.clone_url)
+	githubRemote.username = appConfig.github.username
+	githubRemote.password = appConfig.github.token
 
 	if (!stat) {
 		console.log('---- cloning ----')
-		const url = new URL(repo.clone_url)
-		url.username = appConfig.github.username
-		url.password = appConfig.github.token
 
 		await Deno.mkdir(directory, { recursive: true })
 
 		console.log('cloning', repo.name)
 		const clone = await exec('git', {
-			args: ['clone', /*'--origin', 'github',*/ url.toString(), '.'],
+			args: ['clone', '--origin', GITHUB_REMOTE, githubRemote.toString(), '.'],
 			cwd: directory,
 		})
 
 		if (!clone.ok) {
-			throw new Error('Failed to clone ' + url.toString())
+			throw new Error('Failed to clone ' + githubRemote)
 		}
 	} else if (stat.isDirectory) {
+		const remotes = await getRemotes(directory)
+
+		if (remotes.origin !== githubRemote.toString()) {
+			console.log('---- updating remote ----')
+
+			const set = await exec('git', {
+				args: ['remote', 'set-url', GITHUB_REMOTE, githubRemote.toString()],
+				cwd: directory,
+			})
+
+			if (!set.ok) {
+				throw new Error('Failed to set-url to ' + githubRemote)
+			}
+		}
+
 		console.log('---- pulling ----')
+
 		const pull = await exec('git', {
-			args: ['pull' /*, 'github'*/],
+			args: ['pull', GITHUB_REMOTE],
 			cwd: directory,
 		})
 		if (!pull.ok) {
-			throw new Error('Failed to pull ' + directory)
+			throw new Error('Failed to pull from ' + GITHUB_REMOTE)
 		}
 	} else {
-		throw new Error('Unknown repo ' + directory)
+		throw new Error('Unknown repo data')
 	}
 
-	// Add backup remote
-	const remoteName = 'backup'
-	const remoteUrl = new URL(
+	const backupRemote = new URL(
 		appConfig.target.template.replace('{repo}', repo.name),
-	).toString()
+	)
 
-	console.log('---- adding remote ----')
-	await exec('git', {
-		args: ['remote', 'remove', remoteName],
-		cwd: directory,
-		stderr: 'null',
-	})
-	await exec('git', {
-		args: ['remote', 'add', remoteName, remoteUrl],
-		cwd: directory,
-	})
+	const remotes = await getRemotes(directory, 'push')
+
+	if (!remotes[BACKUP_REMOTE]) {
+		console.log('---- adding backup remote ----')
+
+		const add = await exec('git', {
+			args: ['remote', 'add', BACKUP_REMOTE, backupRemote.toString()],
+			cwd: directory,
+		})
+
+		if (!add.ok) {
+			throw new Error('Failed to add remote ' + backupRemote)
+		}
+	} else if (remotes[BACKUP_REMOTE] !== backupRemote.toString()) {
+		console.log('---- updating backup remote ----')
+
+		const set = await exec('git', {
+			args: ['remote', 'set-url', BACKUP_REMOTE, backupRemote.toString()],
+			cwd: directory,
+		})
+		if (!set.ok) {
+			throw new Error('Failed to set-url ' + backupRemote)
+		}
+	}
 
 	console.log('---- pushing ----')
-	await exec('git', {
-		args: ['push', remoteName, '--all'],
+	const push = await exec('git', {
+		args: ['push', BACKUP_REMOTE, '--all'],
 		cwd: directory,
 	})
+	if (!push.ok) {
+		throw new Error('Failed to push to ' + BACKUP_REMOTE)
+	}
 }
 
-// https://github.com/octokit/octokit.js/issues/2079
-Deno.exit(0)
+async function main() {
+	if (Deno.args.includes('--list')) {
+		for (const repo of repos) {
+			console.log(repo.name)
+		}
+		return
+	}
+
+	let exitCode = 0
+	const failures: Repo[] = []
+
+	for (const repo of repos) {
+		try {
+			await backup(repo)
+		} catch (error) {
+			failures.push(repo)
+			console.error('FAILURE: %s', repo.name)
+			console.error(error)
+			exitCode = 1
+		}
+	}
+
+	if (failures.length > 0) {
+		console.error('\n\nFAILURES:')
+		for (const r of failures) console.error('- ' + r.name)
+	}
+
+	// https://github.com/octokit/octokit.js/issues/2079
+	Deno.exit(exitCode)
+}
+
+main()

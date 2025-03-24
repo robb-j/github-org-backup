@@ -1,4 +1,4 @@
-FROM denoland/deno:alpine-1.45.2
+FROM denoland/deno:alpine-1.45.5
 
 RUN mkdir -p /app/repos && chown -R deno:deno /app \
 	&& apk add --no-cache git openssh
