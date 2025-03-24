@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.1.3
+
+Git remotes are now checked and set again if they are persisted and have since
+changed. I.e. a HTTP basic password has changed since the last pull.
+
+All repos are attempted, logging errors and only exiting cleanly if they all
+pass.
+
 ## 0.1.2
 
 Fixes + improvements
