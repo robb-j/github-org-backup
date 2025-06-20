@@ -26,7 +26,7 @@ export async function exec(
 	}
 }
 
-export async function getRemotes(path: string, method = 'push') {
+export async function getRemotes(path: string | URL, method = 'push') {
 	const proc = await exec('git', {
 		cwd: path,
 		args: ['remote', '--verbose'],
@@ -45,4 +45,10 @@ export async function getRemotes(path: string, method = 'push') {
 			(map, value) => ({ ...map, [value.name]: value.url }),
 			{},
 		)
+}
+
+export function createDebug(namespace: string) {
+	return (message: string, ...args: unknown[]) => {
+		console.debug(`[${namespace}] ` + message, ...args)
+	}
 }

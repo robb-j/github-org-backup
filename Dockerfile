@@ -1,4 +1,4 @@
-FROM denoland/deno:alpine-1.45.5
+FROM denoland/deno:alpine-1.46.0
 
 RUN mkdir -p /app/repos && chown -R deno:deno /app \
 	&& apk add --no-cache git openssh
@@ -12,4 +12,4 @@ RUN deno cache main.ts
 
 ENV DENO_ENV=production
 
-CMD ["deno", "run", "--allow-env", "--allow-read=.", "--allow-write=repos", "--allow-net=api.github.com:443", "--allow-run=git", "main.ts"]
+CMD ["deno", "run", "--allow-env", "--allow-read=.", "--allow-write=repos", "--allow-net=api.github.com:443", "--allow-run=git", "source/main.ts"]

@@ -1,11 +1,11 @@
 {
 	"tasks": {
-		"config": "config.ts",
-		"start": "main.ts"
+		"config": "source/config.ts",
+		"start": "source/main.ts"
 	},
 	"imports": {
-		"octokit": "https://esm.sh/octokit@4.1.2?dts",
-		"gruber": "https://esm.r0b.io/gruber@0.7.0/mod.ts"
+		"gruber": "https://esm.r0b.io/gruber@0.7.0/mod.ts",
+		"octokit": "npm:octokit@^5.0.3"
 	},
 	"fmt": {
 		"singleQuote": true,

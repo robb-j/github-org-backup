@@ -1,32 +1,26 @@
-#!/usr/bin/env deno run --env --allow-env --allow-write=. --allow-read=. --allow-net=api.github.com:443 --allow-run=git
-
 import { Octokit } from 'octokit'
 import { appConfig } from './config.ts'
-import { exec, getRemotes } from './lib.ts'
+import { createDebug, exec, getRemotes } from './lib.ts'
 
-interface Repo {
+export interface Repo {
 	name: string
 	clone_url: string
 }
 
-const octokit = new Octokit({
-	auth: appConfig.github.token,
-})
-
 // https://docs.github.com/en/rest/repos/repos?apiVersion=2022-11-28#list-organization-repositories
-const repos = await octokit.paginate<Repo>(`GET /orgs/{org}/repos`, {
-	org: appConfig.github.org,
-	headers: { 'X-GitHub-Api-Version': '2022-11-28' },
-})
+export function listRepos(octokit: Octokit) {
+	return octokit.paginate<Repo>(`GET /orgs/{org}/repos`, {
+		org: appConfig.github.org,
+		headers: { 'X-GitHub-Api-Version': '2022-11-28' },
+	})
+}
 
-const GITHUB_REMOTE = 'origin'
-const BACKUP_REMOTE = 'backup'
-const REPOS_DIR = 'repos'
+const debug = createDebug('repo')
 
-async function backup(repo: Repo) {
-	console.log('\n\n==== %s ====', repo.name)
+export async function backup(repo: Repo) {
+	debug('backup', repo.name)
 
-	const directory = `${REPOS_DIR}/${repo.name}`
+	const directory = new URL(repo.name, appConfig.repos.dir)
 	const stat = await Deno.stat(`${directory}/.git`).catch(() => null)
 
 	const githubRemote = new URL(repo.clone_url)
@@ -34,13 +28,15 @@ async function backup(repo: Repo) {
 	githubRemote.password = appConfig.github.token
 
 	if (!stat) {
-		console.log('---- cloning ----')
-
-		await Deno.mkdir(directory, { recursive: true })
-
-		console.log('cloning', repo.name)
+		debug('- cloning', repo.clone_url)
 		const clone = await exec('git', {
-			args: ['clone', '--origin', GITHUB_REMOTE, githubRemote.toString(), '.'],
+			args: [
+				'clone',
+				'--origin',
+				appConfig.github.remoteName,
+				githubRemote.toString(),
+				'.',
+			],
 			cwd: directory,
 		})
 
@@ -50,11 +46,16 @@ async function backup(repo: Repo) {
 	} else if (stat.isDirectory) {
 		const remotes = await getRemotes(directory)
 
-		if (remotes.origin !== githubRemote.toString()) {
-			console.log('---- updating remote ----')
+		if (remotes[appConfig.github.remoteName] !== githubRemote.toString()) {
+			debug('- updating github remote')
 
 			const set = await exec('git', {
-				args: ['remote', 'set-url', GITHUB_REMOTE, githubRemote.toString()],
+				args: [
+					'remote',
+					'set-url',
+					appConfig.github.remoteName,
+					githubRemote.toString(),
+				],
 				cwd: directory,
 			})
 
@@ -63,14 +64,14 @@ async function backup(repo: Repo) {
 			}
 		}
 
-		console.log('---- pulling ----')
+		debug('- pulling from github')
 
 		const pull = await exec('git', {
-			args: ['pull', GITHUB_REMOTE],
+			args: ['pull', appConfig.github.remoteName],
 			cwd: directory,
 		})
 		if (!pull.ok) {
-			throw new Error('Failed to pull from ' + GITHUB_REMOTE)
+			throw new Error('Failed to pull from github')
 		}
 	} else {
 		throw new Error('Unknown repo data')
@@ -82,22 +83,32 @@ async function backup(repo: Repo) {
 
 	const remotes = await getRemotes(directory, 'push')
 
-	if (!remotes[BACKUP_REMOTE]) {
+	if (!remotes[appConfig.target.remoteName]) {
 		console.log('---- adding backup remote ----')
 
 		const add = await exec('git', {
-			args: ['remote', 'add', BACKUP_REMOTE, backupRemote.toString()],
+			args: [
+				'remote',
+				'add',
+				appConfig.target.remoteName,
+				backupRemote.toString(),
+			],
 			cwd: directory,
 		})
 
 		if (!add.ok) {
 			throw new Error('Failed to add remote ' + backupRemote)
 		}
-	} else if (remotes[BACKUP_REMOTE] !== backupRemote.toString()) {
+	} else if (remotes[appConfig.target.remoteName] !== backupRemote.toString()) {
 		console.log('---- updating backup remote ----')
 
 		const set = await exec('git', {
-			args: ['remote', 'set-url', BACKUP_REMOTE, backupRemote.toString()],
+			args: [
+				'remote',
+				'set-url',
+				appConfig.target.remoteName,
+				backupRemote.toString(),
+			],
 			cwd: directory,
 		})
 		if (!set.ok) {
@@ -107,15 +118,21 @@ async function backup(repo: Repo) {
 
 	console.log('---- pushing ----')
 	const push = await exec('git', {
-		args: ['push', BACKUP_REMOTE, '--all'],
+		args: ['push', appConfig.target.remoteName, '--all'],
 		cwd: directory,
 	})
 	if (!push.ok) {
-		throw new Error('Failed to push to ' + BACKUP_REMOTE)
+		throw new Error('Failed to push to backup')
 	}
 }
 
-async function main() {
+export async function runRepoBackup() {
+	const octokit = new Octokit({
+		auth: appConfig.github.token,
+	})
+
+	const repos = await listRepos(octokit)
+
 	if (Deno.args.includes('--list')) {
 		for (const repo of repos) {
 			console.log(repo.name)
@@ -123,7 +140,6 @@ async function main() {
 		return
 	}
 
-	let exitCode = 0
 	const failures: Repo[] = []
 	const tolerations = new Set(appConfig.tolerations)
 
@@ -136,7 +152,7 @@ async function main() {
 			console.error(error)
 
 			if (!tolerations.has(repo.name)) {
-				exitCode = 1
+				Deno.exitCode = 1
 			}
 		}
 	}
@@ -145,9 +161,4 @@ async function main() {
 		console.error('\n\nFAILURES:')
 		for (const r of failures) console.error('- ' + r.name)
 	}
-
-	// https://github.com/octokit/octokit.js/issues/2079
-	Deno.exit(exitCode)
 }
-
-main()
