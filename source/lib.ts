@@ -52,3 +52,22 @@ export function createDebug(namespace: string) {
 		console.debug(`[${namespace}] ` + message, ...args)
 	}
 }
+
+const cacheDir = new URL('../.cache/', import.meta.url)
+
+export async function localCached<T>(
+	name: string,
+	factory: () => Promise<T>,
+) {
+	const path = new URL(name + '.json', cacheDir)
+	try {
+		const file = await Deno.readTextFile(path)
+		return JSON.parse(file)
+	} catch {
+		const result = await factory()
+
+		await Deno.mkdir(cacheDir, { recursive: true })
+		await Deno.writeTextFile(path, JSON.stringify(result))
+		return result
+	}
+}

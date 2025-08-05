@@ -1,0 +1,17 @@
+#
+# https://distribution.github.io/distribution/about/configuration/
+# Configuration for the local distribution registry, ran by Docker compose
+#
+version: 0.1
+storage:
+  cache:
+    blobdescriptor: inmemory
+  delete:
+    enabled: true
+http:
+  addr: :5000
+health:
+  storagedriver:
+    enabled: true
+    interval: 10s
+    threshold: 3

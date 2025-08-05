@@ -7,6 +7,7 @@ export interface DistributionTag {
 	name: string
 	tags: string[]
 }
+
 export type DistributionManifest =
 	| OciIndexV1
 	| OciManifestV1
@@ -15,11 +16,15 @@ export type DistributionManifest =
 //
 // OCI stuff
 //
+
+/** The latest non-docker format for an index of multiplatform manifests */
 export interface OciIndexV1 {
 	mediaType: 'application/vnd.oci.image.index.v1+json'
 	schemaVersion: 2
 	manifests: OciManifestRefV1[]
 }
+
+/** A manifest within an {@link OciIndexV1} */
 export interface OciManifestRefV1 {
 	mediaType: 'application/vnd.oci.image.manifest.v1+json'
 	digest: string
@@ -46,6 +51,8 @@ export interface OciLayerRefV1 {
 //
 // Docker stuff
 //
+
+/** The old format docker manifest where you can request the `config` to get the different layers */
 export interface DockerManifestV2 {
 	mediaType: 'application/vnd.docker.distribution.manifest.v2+json'
 	schemaVersion: 2
@@ -61,10 +68,6 @@ export interface DockerLayerV2 {
 	digest: string
 	size: number
 }
-
-// interface RequestExtras {
-// 	redirects?: number
-// }
 
 const MAX_REDIRECTS = 10
 const redirectStatuses = new Set([301, 302, 303, 307, 308])
@@ -156,35 +159,83 @@ export class DistributionClient {
 	}
 
 	// https://distribution.github.io/distribution/spec/api/#pulling-an-image-manifest
-	async getManifest(
-		repository: string,
-		tag: string,
-	): Promise<DistributionManifest | null> {
-		const res = await this.fetch(`./v2/${repository}/manifests/${tag}`, {
+	fetchManifest(repository: string, tag: string, init: RequestInit = {}) {
+		return this.fetch(`./v2/${repository}/manifests/${tag}`, {
 			headers: [
 				['Accept', 'application/vnd.oci.image.index.v1+json'],
 				['Accept', 'application/vnd.oci.image.manifest.v1+json'],
 				['Accept', 'application/vnd.docker.distribution.manifest.v2+json'],
 			],
 			redirect: 'follow',
+			...init,
 		})
+	}
+
+	async getManifest(
+		repository: string,
+		tag: string,
+	): Promise<DistributionManifest | null> {
+		const res = await this.fetchManifest(repository, tag)
 		return res?.ok ? res.json() : null
+	}
+
+	async headManifest(
+		repository: string,
+		tag: string,
+	) {
+		const res = await this.fetchManifest(repository, tag, {
+			method: 'HEAD',
+		})
+		if (res?.ok) console.log(res)
+
+		return res?.ok ?? false
+	}
+
+	async streamManifest(
+		repository: string,
+		tag: string,
+	) {
+		const res = await this.fetchManifest(repository, tag)
+		return res?.ok ? res.body : null
 	}
 
 	// https://distribution.github.io/distribution/spec/api/#pulling-a-layer
 
-	async getBlob(
-		repository: string,
-		digest: string,
-	) {
-		const res = await this.fetch(`./v2/${repository}/blobs/${digest}`, {
+	fetchBlob(repository: string, digest: string, init: RequestInit = {}) {
+		return this.fetch(`./v2/${repository}/blobs/${digest}`, {
 			redirect: 'follow',
 			headers: [
 				['Accept', 'application/vnd.oci.image.manifest.v1+json'],
 				['Accept', 'application/vnd.docker.distribution.manifest.v2+json'],
 			],
 		})
+	}
+
+	async getBlob(
+		repository: string,
+		digest: string,
+	) {
+		const res = await this.fetchBlob(repository, digest)
 		return res?.ok ? res.body : null
+	}
+
+	async getJsonBlob(
+		repository: string,
+		digest: string,
+	) {
+		const res = await this.fetchBlob(repository, digest)
+		return res?.ok ? res.json() : null
+	}
+
+	async headBlob(
+		repository: string,
+		digest: string,
+	) {
+		const res = await this.fetchBlob(repository, digest, {
+			method: 'HEAD',
+		})
+		if (res?.ok) console.log(res)
+		return res?.ok ?? null
 	}
 
 	// TODO: https://distribution.github.io/distribution/spec/api/#pushing-an-image
