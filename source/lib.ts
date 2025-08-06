@@ -58,7 +58,7 @@ const cacheDir = new URL('../.cache/', import.meta.url)
 export async function localCached<T>(
 	name: string,
 	factory: () => Promise<T>,
-) {
+): Promise<T> {
 	const path = new URL(name + '.json', cacheDir)
 	try {
 		const file = await Deno.readTextFile(path)

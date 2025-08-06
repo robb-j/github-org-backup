@@ -1,4 +1,4 @@
-#!/usr/bin/env deno run --env --allow-env --allow-write=. --allow-read=. --allow-net=api.github.com:443,ghcr.io:443,pkg-containers.githubusercontent.com:443 --allow-run=git
+#!/usr/bin/env deno run --env --allow-env --allow-write=. --allow-read=. --allow-net --allow-run=git
 
 import { outputConfig } from './config.ts'
 import { runRegistryBackup } from './registry.ts'

@@ -8,6 +8,8 @@ storage:
     blobdescriptor: inmemory
   delete:
     enabled: true
+  filesystem:
+    rootdirectory: /var/lib/registry
 http:
   addr: :5000
 health:

@@ -1,10 +1,14 @@
+volumes:
+  registry: {}
+
 services:
   registry:
     image: distribution/distribution:3.0.0
     environment:
       KEY: value
     ports:
-      - 5000:5000
+      - 5001:5000
     restart: unless-stopped
     volumes:
       - ./distribution.yml:/etc/distribution/config.yml
+      - registry:/var/lib/registry

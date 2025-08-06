@@ -3,7 +3,12 @@
 import { Octokit } from 'octokit'
 import { appConfig } from '../source/config.ts'
 import { createDebug, localCached } from './lib.ts'
-import { DistributionClient } from './distribution.ts'
+import {
+	DistributionClient,
+	DistributionManifest,
+	MediaType,
+} from './distribution.ts'
+import { OciDescriptorV1 } from './distribution.ts'
 
 interface Package {
 	id: number
@@ -64,6 +69,7 @@ function fetchGitHubInfo(octokit: Octokit) {
 	})
 }
 
+/** This is useful to fetch all meta-info for inspecting and planning */
 function fetchDistributionInfo(
 	client: DistributionClient,
 	images: ContainerImage[],
@@ -74,24 +80,43 @@ function fetchDistributionInfo(
 			const entry = {
 				name: image.name,
 				tags: {} as any,
-				config: {} as any,
+				blobs: {} as any,
 			}
 			output.push(entry)
 
 			for (const tag of image.tags) {
 				const manifest = await client.getManifest(image.name, tag)
-				if (manifest) {
-					if (
-						manifest.mediaType ===
-							'application/vnd.docker.distribution.manifest.v2+json'
-					) {
-						entry.config[manifest.config.digest] = await client.getJsonBlob(
+				entry.tags[tag] = manifest
+				if (!manifest) continue
+
+				if (
+					manifest.mediaType === MediaType.docker.distribution.manifest.v2 &&
+					manifest.config
+				) {
+					entry.blobs[manifest.config.digest] = await client.getJsonBlob(
+						image.name,
+						manifest.config.digest,
+					)
+				}
+
+				if (manifest.mediaType === MediaType.oci.image.index.v1) {
+					for (const childDesc of manifest.manifests) {
+						const child = await client.getManifest(
 							image.name,
-							manifest.config.digest,
+							childDesc.digest,
 						)
+						entry.blobs[childDesc.digest] = child
+						if (
+							child?.mediaType === MediaType.oci.image.manifest.v1 &&
+							child.config
+						) {
+							entry.blobs[child.config.digest] = await client.getJsonBlob(
+								image.name,
+								child.config.digest,
+							)
+						}
 					}
 				}
-				entry.tags[tag] = manifest
 			}
 		}
 		return output
@@ -120,70 +145,108 @@ export async function runRegistryBackup() {
 	const ghcr = new DistributionClient(appConfig.github.registry)
 	ghcr.setBearer(token.token)
 
-	const target = new DistributionClient('http://localhost:5000')
+	// const target = stubDistributionClient() // 'debug' mode
+	const target = new DistributionClient('http://localhost:5001')
 
-	// const distro = await fetchDistributionInfo(distrib, images)
+	// return await fetchDistributionInfo(ghcr, images)
 
-	const dryRun = true
+	const stats = {
+		blobs: 0,
+		ociIndex: 0,
+		ociManifest: {
+			root: 0,
+			child: 0,
+		},
+		dockerManifest: 0,
+		total: 0,
+	}
 
 	for (const image of images) {
 		for (const tag of image.tags) {
-			debug('process %s:%s', image, tag)
+			debug('process %s:%s', image.name, tag)
 
-			const exists = await target.headManifest(image, tag)
-			if (exists) {
-				debug('[skip]')
-				continue
-			}
+			const manifest = await ghcr.getManifest(image.name, tag)
+			if (!manifest) throw new Error('manifest not found')
 
-			if (dryRun) {
-				console.log('upload manifest %s:%s', image, tag)
-			} else {
-				// TODO: stream the manifest
-				// const mani = await ghcr.streamManifest(image, tag)
-			}
-
-			const manifest = await ghcr.getManifest(image, tag)
-			if (!manifest) throw new Error(`manifest not found ${image}:${tag}`)
-
-			if (manifest.mediaType === 'application/vnd.oci.image.index.v1+json') {
+			if (manifest.mediaType === MediaType.oci.image.index.v1) {
 				debug('oci.image.index.v1')
-				for (const layer of manifest.manifests) {
-					if (dryRun) {
-						console.log('  upload blob')
-					} else {
-						// TODO: stream upload the blob
+				stats.ociIndex++
+
+				for (const manifestDesc of manifest.manifests) {
+					const child = await ghcr.getManifest(image.name, manifestDesc.digest)
+					if (!child) throw new Error('manifest not found')
+
+					if (child.mediaType === MediaType.oci.image.manifest.v1) {
+						// Copy the child manifest's config
+						if (child.config) {
+							stats.blobs += await copyBlob(
+								ghcr,
+								image.name,
+								child.config,
+								target,
+							)
+						}
+
+						// Copy each blob layer
+						for (const layerDesc of child.layers) {
+							stats.blobs += await copyBlob(ghcr, image.name, layerDesc, target)
+						}
 					}
+
+					// Copy the child manifest
+					await copyManifest(
+						ghcr,
+						image.name,
+						manifestDesc.digest,
+						child,
+						target,
+					)
+					stats.ociManifest.child++
 				}
 			}
-			// if (manifest.mediaType === 'application/vnd.oci.image.manifest.v1+json') {
+			if (manifest.mediaType === MediaType.oci.image.manifest.v1) {
+				debug('oci.image.manifest.v1')
+				stats.ociManifest.root++
 
-			// }
+				if (manifest.config) {
+					stats.blobs += await copyBlob(
+						ghcr,
+						image.name,
+						manifest.config,
+						target,
+					)
+				}
+
+				for (const layer of manifest.layers) {
+					stats.blobs += await copyBlob(ghcr, image.name, layer, target)
+				}
+			}
+
+			if (manifest.mediaType === MediaType.docker.distribution.manifest.v2) {
+				debug('docker.distribution.manifest.v2')
+				stats.dockerManifest++
+
+				if (manifest.config) {
+					stats.blobs += await copyBlob(
+						ghcr,
+						image.name,
+						manifest.config,
+						target,
+					)
+				}
+
+				for (const layer of manifest.layers) {
+					stats.blobs += await copyBlob(ghcr, image.name, layer, target)
+				}
+			}
+
+			stats.total += await copyManifest(ghcr, image.name, tag, manifest, target)
 		}
+
+		if (stats.total > 10) break
 	}
 
-	// for (const image of images) {
-	// 	debug(image.name)
-
-	// 	for (const tag of image.tags) {
-	// 		debug(' - ' + tag)
-
-	// 		const manifest = await distrib.getManifest(image.name, tag)
-	// 		if (!manifest) throw new Error('unknown manifest')
-
-	// 		if (manifest.mediaType === 'application/vnd.oci.image.index.v1+json') {
-	// 			for (const sub of manifest.manifests) {
-	// 				console.log(sub.mediaType)
-	// 			}
-	// 		}
-	// 		if (
-	// 			manifest.mediaType ===
-	// 				'application/vnd.docker.distribution.manifest.v2+json'
-	// 		) {
-	// 			console.log('')
-	// 		}
-	// 	}
-	// }
+	console.log('stats', stats)
 }
 
 interface RegistryToken {
@@ -199,4 +262,60 @@ async function getRegistryToken(): Promise<RegistryToken | null> {
 		},
 	})
 	return res.ok ? res.json() : null
+}
+
+async function copyManifest(
+	source: DistributionClient,
+	repository: string,
+	reference: string,
+	manifest: DistributionManifest,
+	target: DistributionClient,
+) {
+	const exists = await target.headManifest(repository, reference)
+
+	debug(
+		'copy manifest exists=%o %s@%s',
+		exists,
+		repository,
+		reference,
+		manifest.mediaType,
+	)
+
+	if (exists) {
+		return 0
+	}
+
+	// Request the manifest from the source client
+	const res = await source.fetchManifest(repository, reference)
+	if (!res?.body) throw new Error('manifest not found')
+
+	// Stream the raw manifest to the target client
+	await target.putManifest(repository, reference, manifest.mediaType, res.body)
+
+	return 1
+}
+
+async function copyBlob<T>(
+	source: DistributionClient,
+	repository: string,
+	desc: OciDescriptorV1,
+	target: DistributionClient,
+) {
+	const exists = await target.headBlob(repository, desc.digest)
+
+	debug('copy blob exists=%o %s@%s ', exists, repository, desc.digest)
+
+	if (exists) {
+		return 0
+	}
+
+	// Request the blob from the source client
+	const res = await source.fetchBlob(repository, desc.digest)
+	if (!res?.body) throw new Error('blob not found')
+
+	// Stream the raw blob to the target client
+	const success = await target.putBlob(repository, desc, res.body)
+	if (!success) throw new Error('failed to upload')
+
+	return 1
 }

@@ -9,44 +9,96 @@ export interface DistributionTag {
 }
 
 export type DistributionManifest =
-	| OciIndexV1
+	| OciImageIndexV1
 	| OciManifestV1
 	| DockerManifestV2
+
+export const MediaType = {
+	oci: {
+		image: {
+			index: {
+				v1: 'application/vnd.oci.image.index.v1+json',
+			},
+			manifest: {
+				v1: 'application/vnd.oci.image.manifest.v1+json',
+			},
+			config: {
+				v1: 'application/vnd.oci.image.config.v1+json',
+			},
+		},
+	},
+	docker: {
+		distribution: {
+			manifest: {
+				v2: 'application/vnd.docker.distribution.manifest.v2+json',
+			},
+		},
+		container: {
+			image: {
+				v1: 'application/vnd.docker.container.image.v1+json',
+			},
+		},
+	},
+} as const
 
 //
 // OCI stuff
 //
 
-/** The latest non-docker format for an index of multiplatform manifests */
-export interface OciIndexV1 {
+/**
+ * The latest non-docker format for an index of multiplatform manifests
+ *
+ * https://specs.opencontainers.org/image-spec/image-index/?v=v1.0.1
+ */
+export interface OciImageIndexV1 {
 	mediaType: 'application/vnd.oci.image.index.v1+json'
 	schemaVersion: 2
-	manifests: OciManifestRefV1[]
+	manifests: OciManifestDescriptorV1[]
 }
 
-/** A manifest within an {@link OciIndexV1} */
-export interface OciManifestRefV1 {
+/**
+ * A manifest within an {@link OciImageIndexV1}
+ * which is a {@link OciDescriptorV1} with extra properties
+ *
+ * https://specs.opencontainers.org/image-spec/descriptor/?v=v1.0.1
+ */
+export interface OciManifestDescriptorV1 {
 	mediaType: 'application/vnd.oci.image.manifest.v1+json'
 	digest: string
 	size: number
 	platform: { architecture: string; os: string }
 	annotations?: Record<string, string | undefined>
 }
+
+/**
+ * A manifest describing the config and layers of an image
+ *
+ * https://specs.opencontainers.org/image-spec/manifest/?v=v1.0.1
+ */
 export interface OciManifestV1 {
 	mediaType: 'application/vnd.oci.image.manifest.v1+json'
 	schemaVersion: 2
-	config: {
+	config?: {
 		digest: string
 		mediaType: 'application/vnd.oci.image.config.v1+json'
 		size: number
 	}
-	layers: OciLayerRefV1[]
+	layers: OciDescriptorV1[]
 }
-export interface OciLayerRefV1 {
+
+/**
+ * A reference to something else
+ */
+export interface OciDescriptorV1 {
 	digest: string
 	mediaType: string
 	size: number
 }
+
+/*
+ * might be useful:
+ * https://specs.opencontainers.org/image-spec/config/?v=v1.0.1#properties
+ */
 
 //
 // Docker stuff
@@ -56,7 +108,7 @@ export interface OciLayerRefV1 {
 export interface DockerManifestV2 {
 	mediaType: 'application/vnd.docker.distribution.manifest.v2+json'
 	schemaVersion: 2
-	config: {
+	config?: {
 		mediaType: string
 		digest: string
 		size: number
@@ -106,12 +158,16 @@ export class DistributionClient {
 			request.headers.append('Authorization', `Bearer ${this.bearer}`)
 		}
 
-		this.debug('fetch %o', endpoint.toString(), request.headers)
+		this.debug('fetch %o', endpoint.toString())
 
 		try {
 			const res = await fetch(request)
-			if (!res.ok) {
-				this.debug('failed status=%o', res.status, await res.json())
+			if (!res.ok && res.status !== 404) {
+				this.debug(
+					'failed status=%o',
+					res.status,
+					res.body ? await res.text() : '',
+				)
 			}
 			// if (redirectStatuses.has(res.status)) {
 			// 	return this._follow(res, request)
@@ -186,17 +242,26 @@ export class DistributionClient {
 		const res = await this.fetchManifest(repository, tag, {
 			method: 'HEAD',
 		})
-		if (res?.ok) console.log(res)
+		// if (res?.ok) console.log(res)
 
 		return res?.ok ?? false
 	}
 
-	async streamManifest(
+	// https://distribution.github.io/distribution/spec/api/#pushing-an-image-manifest
+
+	putManifest(
 		repository: string,
-		tag: string,
+		reference: string,
+		mediaType: string,
+		body: BodyInit,
 	) {
-		const res = await this.fetchManifest(repository, tag)
-		return res?.ok ? res.body : null
+		return this.fetch(`./v2/${repository}/manifests/${reference}`, {
+			method: 'PUT',
+			headers: {
+				'Content-Type': mediaType,
+			},
+			body,
+		})
 	}
 
 	// https://distribution.github.io/distribution/spec/api/#pulling-a-layer
@@ -234,9 +299,53 @@ export class DistributionClient {
 		const res = await this.fetchBlob(repository, digest, {
 			method: 'HEAD',
 		})
-		if (res?.ok) console.log(res)
+		// if (res?.ok) console.log(res)
 		return res?.ok ?? null
 	}
 
+	// https://distribution.github.io/distribution/spec/api/#monolithic-upload
+	async putBlob(
+		repository: string,
+		{ digest, size }: OciDescriptorV1,
+		body: BodyInit,
+	) {
+		// const head = await this.headBlob(repository, digest)
+		// if (head) return
+
+		const start = await this.fetch(`./v2/${repository}/blobs/uploads/`, {
+			method: 'POST',
+		})
+		if (!start?.ok) throw new Error('cannot upload')
+
+		// ~ /v2/<name>/blobs/uploads/<uuid>
+		const location = this.resolve(start.headers.get('location')!)
+		location?.searchParams.set('digest', digest)
+
+		const upload = await this.fetch(location, {
+			method: 'PUT',
+			headers: {
+				'Content-Length': size.toString(),
+				'Content-Type': 'application/octet-stream',
+			},
+			body,
+		})
+		return upload?.ok ?? false
+	}
+
+	resolve(urlOrPath: string) {
+		if (urlOrPath.startsWith('/')) return new URL('.' + urlOrPath, this.url)
+		return new URL(urlOrPath, this.url)
+	}
+
 	// TODO: https://distribution.github.io/distribution/spec/api/#pushing-an-image
+}
+
+export function stubDistributionClient(): DistributionClient {
+	return new Proxy<any>({}, {
+		get(_t, property) {
+			return (...args: any[]) => {
+				// console.log('[distrib] %s', property, args)
+			}
+		},
+	})
 }
