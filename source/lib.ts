@@ -88,3 +88,15 @@ export function print(text: string) {
 		new TextEncoder().encode(text),
 	)
 }
+
+export function formatFileSize(bytes: number) {
+	const fmt = new Intl.NumberFormat('en-GB', {
+		style: 'unit',
+		unit: 'byte',
+		unitDisplay: 'narrow',
+		notation: 'compact',
+		compactDisplay: 'short',
+		maximumFractionDigits: 1,
+	})
+	return fmt.format(bytes)
+}

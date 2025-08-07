@@ -2,7 +2,7 @@
 
 import { Octokit } from 'octokit'
 import { appConfig } from '../source/config.ts'
-import { createDebug, localCached, print } from './lib.ts'
+import { createDebug, formatFileSize, localCached, print } from './lib.ts'
 import {
 	DistributionClient,
 	DistributionManifest,
@@ -175,6 +175,7 @@ export async function runRegistryBackup() {
 
 			const manifest = await ghcr.getManifest(image.name, tag)
 			if (!manifest) throw new Error('manifest not found')
+			let size = 0
 
 			// It could skip manifests its already seen here but then it would not be able to populate the "seen" map
 			// There could be a more-efficient population based on the values from the manifests/config blobs
@@ -196,6 +197,7 @@ export async function runRegistryBackup() {
 					if (child.mediaType === MediaType.oci.image.manifest.v1) {
 						// Copy the child manifest's config
 						if (child.config) {
+							size += child.config.size
 							stats.blobs += await copyBlob(
 								ghcr,
 								image.name,
@@ -207,6 +209,7 @@ export async function runRegistryBackup() {
 
 						// Copy each blob layer
 						for (const layerDesc of child.layers) {
+							size += layerDesc.size
 							stats.blobs += await copyBlob(
 								ghcr,
 								image.name,
@@ -218,6 +221,7 @@ export async function runRegistryBackup() {
 					}
 
 					// Copy the child manifest
+					size += manifestDesc.size
 					await copyManifest(
 						ghcr,
 						image.name,
@@ -228,11 +232,13 @@ export async function runRegistryBackup() {
 					stats.ociManifest++
 				}
 			}
+
 			if (manifest.mediaType === MediaType.oci.image.manifest.v1) {
 				debug('oci.image.manifest.v1')
 				stats.ociManifest++
 
 				if (manifest.config) {
+					size += manifest.config.size
 					stats.blobs += await copyBlob(
 						ghcr,
 						image.name,
@@ -243,6 +249,7 @@ export async function runRegistryBackup() {
 				}
 
 				for (const layer of manifest.layers) {
+					size += layer.size
 					stats.blobs += await copyBlob(ghcr, image.name, layer, target, seen)
 				}
 			}
@@ -252,6 +259,7 @@ export async function runRegistryBackup() {
 				stats.dockerManifest++
 
 				if (manifest.config) {
+					size += manifest.config.size
 					stats.blobs += await copyBlob(
 						ghcr,
 						image.name,
@@ -262,12 +270,13 @@ export async function runRegistryBackup() {
 				}
 
 				for (const layer of manifest.layers) {
+					size += layer.size
 					stats.blobs += await copyBlob(ghcr, image.name, layer, target, seen)
 				}
 			}
 
 			stats.total += await copyManifest(ghcr, image.name, tag, manifest, target)
-			print(' done\n')
+			print(` done [${formatFileSize(size)}]\n`)
 		}
 
 		// if (stats.total > 0) break
