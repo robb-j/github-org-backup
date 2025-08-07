@@ -49,7 +49,7 @@ export async function getRemotes(path: string | URL, method = 'push') {
 
 export function createDebug(namespace: string) {
 	return (message: string, ...args: unknown[]) => {
-		console.debug(`[${namespace}] ` + message, ...args)
+		console.error(`[${namespace}] ` + message, ...args)
 	}
 }
 
@@ -70,4 +70,21 @@ export async function localCached<T>(
 		await Deno.writeTextFile(path, JSON.stringify(result))
 		return result
 	}
+}
+
+export function applyTemplate(
+	template: string,
+	values: Record<string, string>,
+) {
+	let output = template
+	for (const [key, value] of Object.entries(values)) {
+		output = output.replaceAll(`{${key}}`, value)
+	}
+	return output
+}
+
+export function print(text: string) {
+	Deno.stdout.writeSync(
+		new TextEncoder().encode(text),
+	)
 }

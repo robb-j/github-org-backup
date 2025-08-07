@@ -45,13 +45,20 @@ your volume at `/app/repos` as user `1000:1000`.
 
 Usage:
 
-| name            | type   | flag | variable        | fallback                                    |
-| --------------- | ------ | ---- | --------------- | ------------------------------------------- |
-| env             | string | ~    | DENO_ENV        | development                                 |
-| github.org      | string | ~    | GITHUB_ORG      | geoff-org                                   |
-| github.token    | string | ~    | GITHUB_TOKEN    |                                             |
-| github.username | string | ~    | GITHUB_USERNAME | geoff-testington                            |
-| target.template | string | ~    | TARGET_TEMPLATE | https://example.com/organisation/{repo}.git |
+| name                    | type   | flag | variable                 | fallback                                                |
+| ----------------------- | ------ | ---- | ------------------------ | ------------------------------------------------------- |
+| env                     | string | ~    | DENO_ENV                 | development                                             |
+| github.org              | string | ~    | GITHUB_ORG               | geoff-org                                               |
+| github.registry         | url    | ~    | GITHUB_REGISTRY          | https://ghcr.io/                                        |
+| github.remoteName       | string | ~    | GITHUB_REMOTE            | origin                                                  |
+| github.token            | string | ~    | GITHUB_TOKEN             |                                                         |
+| github.username         | string | ~    | GITHUB_USERNAME          | geoff-testington                                        |
+| repos.dir               | url    | ~    | REPOS_DIR                | file:///Users/nra76/Developer/labs/github-backup/repos/ |
+| target.registryPassword | string | ~    | TARGET_REGISTRY_PASSWORD |                                                         |
+| target.registryUrl      | url    | ~    | TARGET_REGISTRY_URL      | http://localhost:5001/                                  |
+| target.registryUser     | string | ~    | TARGET_REGISTRY_USERNAME |                                                         |
+| target.remoteName       | string | ~    | BACKUP_REMOTE            | backup                                                  |
+| target.remoteTemplate   | string | ~    | TARGET_TEMPLATE          | https://example.com/organisation/{repo}.git             |
 
 Default:
 
@@ -79,8 +86,8 @@ to find all the repositories that belong to the organisation (`github.org`).
 > permission to do that and also permission to read the repo.
 
 Next, each repository is cloned into the `repos` folder, where a new remote is
-added using the `target.template` value, where `{repo}` is replaced with the
-name of the repo in GitHub.
+added using the `target.remoteTemplate` value, where `{repo}` is replaced with
+the name of the repo in GitHub.
 
 Finally, the repo is pushed to the new remote. The idea is you can encode the
 username/password in that template, like `https://user:password@example.com`.

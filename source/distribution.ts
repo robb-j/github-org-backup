@@ -332,6 +332,24 @@ export class DistributionClient {
 		return upload?.ok ?? false
 	}
 
+	async mountBlob(
+		repository: string,
+		{ digest }: OciDescriptorV1,
+		otherRepository: string,
+	) {
+		const endpoint = this.resolve(`./v2/${repository}/blobs/uploads/`)
+		endpoint.searchParams.set('mount', digest)
+		endpoint.searchParams.set('from', otherRepository)
+
+		const res = await this.fetch(endpoint, {
+			method: 'POST',
+			headers: {
+				'Content-Length': '0',
+			},
+		})
+		return res?.ok ?? false
+	}
+
 	resolve(urlOrPath: string) {
 		if (urlOrPath.startsWith('/')) return new URL('.' + urlOrPath, this.url)
 		return new URL(urlOrPath, this.url)

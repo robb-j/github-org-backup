@@ -1,6 +1,6 @@
 import { Octokit } from 'octokit'
 import { appConfig } from './config.ts'
-import { createDebug, exec, getRemotes } from './lib.ts'
+import { applyTemplate, createDebug, exec, getRemotes } from './lib.ts'
 
 export interface Repo {
 	name: string
@@ -78,7 +78,7 @@ export async function backup(repo: Repo) {
 	}
 
 	const backupRemote = new URL(
-		appConfig.target.template.replace('{repo}', repo.name),
+		applyTemplate(appConfig.target.remoteTemplate, { repo: repo.name }),
 	)
 
 	const remotes = await getRemotes(directory, 'push')

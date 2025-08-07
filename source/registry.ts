@@ -2,7 +2,7 @@
 
 import { Octokit } from 'octokit'
 import { appConfig } from '../source/config.ts'
-import { createDebug, localCached } from './lib.ts'
+import { createDebug, localCached, print } from './lib.ts'
 import {
 	DistributionClient,
 	DistributionManifest,
@@ -123,6 +123,11 @@ function fetchDistributionInfo(
 	})
 }
 
+interface SeenBlob {
+	digest: string
+	repository: string
+}
+
 export async function runRegistryBackup() {
 	const octokit = new Octokit({
 		auth: appConfig.github.token,
@@ -133,7 +138,7 @@ export async function runRegistryBackup() {
 	if (Deno.args.includes('--list')) {
 		for (const img of images) {
 			console.log(img.name)
-			for (const tag of img.tags) console.log(' - ' + tag)
+			for (const tag of img.tags) console.log(` - ${tag}`)
 			console.log()
 		}
 		return
@@ -146,27 +151,39 @@ export async function runRegistryBackup() {
 	ghcr.setBearer(token.token)
 
 	// const target = stubDistributionClient() // 'debug' mode
-	const target = new DistributionClient('http://localhost:5001')
-
-	// return await fetchDistributionInfo(ghcr, images)
-
-	const stats = {
-		blobs: 0,
-		ociIndex: 0,
-		ociManifest: {
-			root: 0,
-			child: 0,
-		},
-		dockerManifest: 0,
-		total: 0,
+	const target = new DistributionClient(appConfig.target.registryUrl)
+	if (appConfig.target.registryUser || appConfig.target.registryPassword) {
+		target.setBasic(
+			appConfig.target.registryUser,
+			appConfig.target.registryPassword,
+		)
 	}
+
+	const stats = createStats({
+		blobs: '.',
+		ociIndex: '',
+		ociManifest: '',
+		dockerManifest: '',
+		total: '.',
+	})
+
+	const seen = new Map<string, SeenBlob>()
 
 	for (const image of images) {
 		for (const tag of image.tags) {
-			debug('process %s:%s', image.name, tag)
+			print(`${image.name}:${tag}: `)
 
 			const manifest = await ghcr.getManifest(image.name, tag)
 			if (!manifest) throw new Error('manifest not found')
+
+			// It could skip manifests its already seen here but then it would not be able to populate the "seen" map
+			// There could be a more-efficient population based on the values from the manifests/config blobs
+
+			// const alreadyUploaded = await target.headManifest(image.name, tag)
+			// if (alreadyUploaded) {
+			// 	print('skip\n')
+			// 	continue
+			// }
 
 			if (manifest.mediaType === MediaType.oci.image.index.v1) {
 				debug('oci.image.index.v1')
@@ -184,12 +201,19 @@ export async function runRegistryBackup() {
 								image.name,
 								child.config,
 								target,
+								seen,
 							)
 						}
 
 						// Copy each blob layer
 						for (const layerDesc of child.layers) {
-							stats.blobs += await copyBlob(ghcr, image.name, layerDesc, target)
+							stats.blobs += await copyBlob(
+								ghcr,
+								image.name,
+								layerDesc,
+								target,
+								seen,
+							)
 						}
 					}
 
@@ -201,12 +225,12 @@ export async function runRegistryBackup() {
 						child,
 						target,
 					)
-					stats.ociManifest.child++
+					stats.ociManifest++
 				}
 			}
 			if (manifest.mediaType === MediaType.oci.image.manifest.v1) {
 				debug('oci.image.manifest.v1')
-				stats.ociManifest.root++
+				stats.ociManifest++
 
 				if (manifest.config) {
 					stats.blobs += await copyBlob(
@@ -214,11 +238,12 @@ export async function runRegistryBackup() {
 						image.name,
 						manifest.config,
 						target,
+						seen,
 					)
 				}
 
 				for (const layer of manifest.layers) {
-					stats.blobs += await copyBlob(ghcr, image.name, layer, target)
+					stats.blobs += await copyBlob(ghcr, image.name, layer, target, seen)
 				}
 			}
 
@@ -232,18 +257,20 @@ export async function runRegistryBackup() {
 						image.name,
 						manifest.config,
 						target,
+						seen,
 					)
 				}
 
 				for (const layer of manifest.layers) {
-					stats.blobs += await copyBlob(ghcr, image.name, layer, target)
+					stats.blobs += await copyBlob(ghcr, image.name, layer, target, seen)
 				}
 			}
 
 			stats.total += await copyManifest(ghcr, image.name, tag, manifest, target)
+			print(' done\n')
 		}
 
-		if (stats.total > 10) break
+		// if (stats.total > 0) break
 	}
 
 	console.log('stats', stats)
@@ -300,13 +327,29 @@ async function copyBlob<T>(
 	repository: string,
 	desc: OciDescriptorV1,
 	target: DistributionClient,
+	seen: Map<string, SeenBlob>,
 ) {
 	const exists = await target.headBlob(repository, desc.digest)
 
-	debug('copy blob exists=%o %s@%s ', exists, repository, desc.digest)
+	const found = seen.get(desc.digest)
+
+	debug(
+		'copy blob exists=%o found=%o %s@%s ',
+		exists,
+		found?.repository,
+		repository,
+		desc.digest,
+	)
 
 	if (exists) {
+		seen.set(desc.digest, { digest: desc.digest, repository })
 		return 0
+	}
+
+	if (found) {
+		const mounted = await target.mountBlob(repository, desc, found.repository)
+		debug('mount %s success=%o', found.repository, mounted)
+		if (mounted) return 1
 	}
 
 	// Request the blob from the source client
@@ -317,5 +360,30 @@ async function copyBlob<T>(
 	const success = await target.putBlob(repository, desc, res.body)
 	if (!success) throw new Error('failed to upload')
 
+	seen.set(desc.digest, { digest: desc.digest, repository })
+
 	return 1
+}
+
+function createStats<T extends string>(symbols: Record<T, string>) {
+	const counts = new Map<string | symbol, number>(
+		Object.keys(symbols).map((k) => [k, 0]),
+	)
+
+	return new Proxy({} as Record<T, number>, {
+		get(target, property, reciever) {
+			return (counts.has(property))
+				? counts.get(property) ?? 0
+				: Reflect.get(target, property, reciever)
+		},
+		set(_, property, newValue) {
+			if (!counts.has(property)) return false
+
+			const current = counts.get(property) ?? 0
+			if (newValue > current) print(symbols[property as T] ?? '')
+			counts.set(property, newValue)
+
+			return true
+		},
+	})
 }

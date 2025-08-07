@@ -26,13 +26,25 @@ const AppConfig = config.object({
 		}),
 	}),
 	target: config.object({
-		template: config.string({
+		remoteTemplate: config.string({
 			variable: 'TARGET_TEMPLATE',
 			fallback: 'https://example.com/organisation/{repo}.git',
 		}),
 		remoteName: config.string({
 			variable: 'BACKUP_REMOTE',
 			fallback: 'backup',
+		}),
+		registryUrl: config.url({
+			variable: 'TARGET_REGISTRY_URL',
+			fallback: 'http://localhost:5001',
+		}),
+		registryUser: config.string({
+			variable: 'TARGET_REGISTRY_USERNAME',
+			fallback: '',
+		}),
+		registryPassword: config.string({
+			variable: 'TARGET_REGISTRY_PASSWORD',
+			fallback: '',
 		}),
 	}),
 	tolerations: Structure.array(
