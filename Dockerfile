@@ -12,5 +12,5 @@ RUN deno install --allow-import=esm.r0b.io:443,jsr.io:443
 
 ENV DENO_ENV=production
 
-ENTRYPOINT ["/tini", "--", "docker-entrypoint.sh", "deno", "run", "--allow-import=esm.r0b.io:443,jsr.io:443", "--allow-env", "--allow-read=.", "--allow-write=repos,.cache", "--allow-net", "--allow-run=git", "source/main.ts"]
+ENTRYPOINT ["/tini", "--", "docker-entrypoint.sh", "deno", "run", "--allow-import=esm.r0b.io:443,jsr.io:443", "--allow-env", "--allow-read=.", "--allow-write=repos,.cache", "--allow-net", "--allow-run", "source/main.ts"]
 CMD ["config"]

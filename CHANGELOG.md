@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.2.2
+
+- Simplify `--allow-run` flag to resolve "Requires --allow-run permissions to
+  spawn subprocess with LD_LIBRARY_PATH environment variable. Alternatively,
+  spawn with the environment variable unset."
+
 ## 0.2.1
 
 - Fix docker command (add .cache to `--allow-write`)
