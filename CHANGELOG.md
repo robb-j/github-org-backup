@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.2.1
+
+- Fix docker command (add .cache to `--allow-write`)
+
 ## 0.2.0
 
 - Add "registry" command to back up ghcr.io images

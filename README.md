@@ -70,10 +70,19 @@ Default:
 	"github": {
 		"org": "geoff-org",
 		"token": "",
-		"username": "geoff-testington"
+		"username": "geoff-testington",
+		"remoteName": "origin",
+		"registry": "https://ghcr.io/"
 	},
 	"target": {
-		"template": "https://example.com/organisation/{repo}.git"
+		"remoteTemplate": "https://example.com/organisation/{repo}.git",
+		"remoteName": "backup",
+		"registryUrl": "http://localhost:5001/",
+		"registryUser": "",
+		"registryPassword": ""
+	},
+	"repos": {
+		"dir": "./repos/"
 	}
 }
 ```
