@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.2.3
+
+- Disable debug logs in production
+
 ## 0.2.2
 
 - Simplify `--allow-run` flag to resolve "Requires --allow-run permissions to

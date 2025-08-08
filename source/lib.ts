@@ -1,3 +1,5 @@
+import { appConfig } from './config.ts'
+
 /** Execute a binary and get the status code, stdout & stderror */
 export async function exec(
 	command: URL | string,
@@ -48,6 +50,7 @@ export async function getRemotes(path: string | URL, method = 'push') {
 }
 
 export function createDebug(namespace: string) {
+	if (appConfig.env === 'production') return () => {}
 	return (message: string, ...args: unknown[]) => {
 		console.error(`[${namespace}] ` + message, ...args)
 	}
