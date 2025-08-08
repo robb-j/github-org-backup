@@ -222,9 +222,14 @@ export async function runRegistryBackup() {
 
 	const seen = new Map<string, SeenBlob>()
 
-	for (const image of filterContainers(images)) {
+	let current = 0
+	const filtered = filterContainers(images)
+	const todo = filtered.map((img) => img.tags.length).reduce((a, b) => a + b, 0)
+
+	for (const image of filtered) {
 		for (const tag of image.tags) {
-			print(`${image.name}:${tag} `)
+			current += 1
+			print(`[${current}/${todo}] ${image.name}:${tag} `)
 
 			const manifest = await ghcr.getManifest(image.name, tag)
 			if (!manifest) throw new Error('manifest not found')
