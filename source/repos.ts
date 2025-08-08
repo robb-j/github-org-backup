@@ -1,6 +1,12 @@
 import { Octokit } from 'octokit'
 import { appConfig } from './config.ts'
-import { applyTemplate, createDebug, exec, getRemotes } from './lib.ts'
+import {
+	applyTemplate,
+	createDebug,
+	exec,
+	getRemotes,
+	localCached,
+} from './lib.ts'
 
 export interface Repo {
 	name: string
@@ -9,10 +15,14 @@ export interface Repo {
 
 // https://docs.github.com/en/rest/repos/repos?apiVersion=2022-11-28#list-organization-repositories
 export function listRepos(octokit: Octokit) {
-	return octokit.paginate<Repo>(`GET /orgs/{org}/repos`, {
-		org: appConfig.github.org,
-		headers: { 'X-GitHub-Api-Version': '2022-11-28' },
-	})
+	return localCached(
+		'repos',
+		() =>
+			octokit.paginate<Repo>(`GET /orgs/{org}/repos`, {
+				org: appConfig.github.org,
+				headers: { 'X-GitHub-Api-Version': '2022-11-28' },
+			}),
+	)
 }
 
 const debug = createDebug('repo')
@@ -21,7 +31,7 @@ export async function backup(repo: Repo) {
 	debug('backup', repo.name)
 
 	const directory = new URL(repo.name, appConfig.repos.dir)
-	const stat = await Deno.stat(`${directory}/.git`).catch(() => null)
+	const stat = await Deno.stat(new URL(`${directory}/.git`)).catch(() => null)
 
 	const githubRemote = new URL(repo.clone_url)
 	githubRemote.username = appConfig.github.username
