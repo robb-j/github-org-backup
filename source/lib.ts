@@ -103,3 +103,23 @@ export function formatFileSize(bytes: number) {
 	})
 	return fmt.format(bytes)
 }
+
+export class DebugStream extends TransformStream<Uint8Array, Uint8Array> {
+	constructor(size: number) {
+		const debug = createDebug('stream')
+		const fullSize = formatFileSize(size)
+		let bytes = 0
+		let last = ''
+		super({
+			transform(chunk, controller) {
+				bytes += chunk.byteLength
+				const progress = ((bytes / size) * 100).toFixed(0)
+				if (progress !== last) {
+					debug(`upload ${fullSize} ${progress}%`)
+					last = progress
+				}
+				controller.enqueue(chunk)
+			},
+		})
+	}
+}

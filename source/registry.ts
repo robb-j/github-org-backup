@@ -2,7 +2,13 @@
 
 import { Octokit } from 'octokit'
 import { appConfig } from '../source/config.ts'
-import { createDebug, formatFileSize, localCached, print } from './lib.ts'
+import {
+	createDebug,
+	DebugStream,
+	formatFileSize,
+	localCached,
+	print,
+} from './lib.ts'
 import {
 	DistributionClient,
 	DistributionManifest,
@@ -470,7 +476,11 @@ async function copyBlob<T>(
 	if (!res?.body) throw new Error('blob not found')
 
 	// Stream the raw blob to the target client
-	const success = await target.putBlob(repository, desc, res.body)
+	const success = await target.putBlob(
+		repository,
+		desc,
+		res.body.pipeThrough(new DebugStream(desc.size)),
+	)
 	if (!success) throw new Error('failed to upload')
 
 	seen.set(desc.digest, { digest: desc.digest, repository })
