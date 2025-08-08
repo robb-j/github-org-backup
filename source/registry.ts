@@ -123,6 +123,52 @@ function fetchDistributionInfo(
 	})
 }
 
+// Pick which containers to be backed up
+// It will:
+// - keep the latest patch release for semver ~ major.minor.x
+// - ignore any sha-abcdef type wip images
+// - keep anything else
+function filterContainers(images: ContainerImage[]) {
+	const output: ContainerImage[] = []
+	for (const image of images) {
+		// A map of major/minor combination to the stored semver to be kept
+		const keep = new Map<string, [number, number, number]>()
+
+		// non-semver images to be kept
+		const others = new Set<string>()
+
+		for (const tag of image.tags) {
+			// ignore sha-based images
+			if (tag.startsWith('sha-')) continue
+
+			// Parse the semver and keep non-semver images
+			const semver = /^(\d+)\.(\d+)\.(\d+)$/.exec(tag)
+			if (!semver) {
+				others.add(tag)
+				continue
+			}
+
+			const [major, minor, patch] = semver.slice(1).map((v) => parseInt(v))
+
+			const targetTag = `${major}.${minor}.x`
+			const found = keep.get(targetTag)
+			if (!found || patch > found[2]) {
+				keep.set(targetTag, [major, minor, patch])
+			}
+		}
+
+		// Reconstruct the ContainerImage based on the new tags
+		output.push({
+			name: image.name,
+			tags: [
+				...others,
+				...Array.from(keep.values()).map((v) => v.join('.')),
+			],
+		})
+	}
+	return output
+}
+
 interface SeenBlob {
 	digest: string
 	repository: string
@@ -135,11 +181,18 @@ export async function runRegistryBackup() {
 
 	const { images } = await fetchGitHubInfo(octokit)
 
+	// list all parsed images when commanded to
 	if (Deno.args.includes('--list')) {
 		for (const img of images) {
-			console.log(img.name)
-			for (const tag of img.tags) console.log(` - ${tag}`)
-			console.log()
+			for (const tag of img.tags) console.log('%s:%s', img.name, tag)
+		}
+		return
+	}
+
+	// list out the filtered containers if that option is set
+	if (Deno.args.includes('--filter')) {
+		for (const img of filterContainers(images)) {
+			for (const tag of img.tags) console.log('%s:%s', img.name, tag)
 		}
 		return
 	}
@@ -169,22 +222,17 @@ export async function runRegistryBackup() {
 
 	const seen = new Map<string, SeenBlob>()
 
-	for (const image of images) {
+	for (const image of filterContainers(images)) {
 		for (const tag of image.tags) {
-			print(`${image.name}:${tag}: `)
+			print(`${image.name}:${tag} `)
 
 			const manifest = await ghcr.getManifest(image.name, tag)
 			if (!manifest) throw new Error('manifest not found')
 			let size = 0
 
-			// It could skip manifests its already seen here but then it would not be able to populate the "seen" map
-			// There could be a more-efficient population based on the values from the manifests/config blobs
-
-			// const alreadyUploaded = await target.headManifest(image.name, tag)
-			// if (alreadyUploaded) {
-			// 	print('skip\n')
-			// 	continue
-			// }
+			// See if the manifest is already uploaded
+			// this opts-in to a quicker scan of manifests to update the "seen" registry
+			const alreadyUploaded = await target.headManifest(image.name, tag)
 
 			if (manifest.mediaType === MediaType.oci.image.index.v1) {
 				debug('oci.image.index.v1')
@@ -193,6 +241,11 @@ export async function runRegistryBackup() {
 				for (const manifestDesc of manifest.manifests) {
 					const child = await ghcr.getManifest(image.name, manifestDesc.digest)
 					if (!child) throw new Error('manifest not found')
+
+					if (alreadyUploaded) {
+						fillBlobs(seen, image.name, child)
+						continue
+					}
 
 					if (child.mediaType === MediaType.oci.image.manifest.v1) {
 						// Copy the child manifest's config
@@ -231,11 +284,22 @@ export async function runRegistryBackup() {
 					)
 					stats.ociManifest++
 				}
+
+				if (alreadyUploaded) {
+					print(' skip\n')
+					continue
+				}
 			}
 
 			if (manifest.mediaType === MediaType.oci.image.manifest.v1) {
 				debug('oci.image.manifest.v1')
 				stats.ociManifest++
+
+				if (alreadyUploaded) {
+					fillBlobs(seen, image.name, manifest)
+					print(' skip\n')
+					continue
+				}
 
 				if (manifest.config) {
 					size += manifest.config.size
@@ -257,6 +321,12 @@ export async function runRegistryBackup() {
 			if (manifest.mediaType === MediaType.docker.distribution.manifest.v2) {
 				debug('docker.distribution.manifest.v2')
 				stats.dockerManifest++
+
+				if (alreadyUploaded) {
+					fillBlobs(seen, image.name, manifest)
+					print(' skip\n')
+					continue
+				}
 
 				if (manifest.config) {
 					size += manifest.config.size
@@ -331,6 +401,35 @@ async function copyManifest(
 	return 1
 }
 
+function fillBlobs(
+	blobs: Map<string, SeenBlob>,
+	repository: string,
+	manifest: DistributionManifest,
+) {
+	if (manifest.mediaType === MediaType.oci.image.manifest.v1) {
+		if (manifest.config) {
+			blobs.set(manifest.config.digest, {
+				digest: manifest.config.digest,
+				repository,
+			})
+		}
+		for (const layer of manifest.layers) {
+			blobs.set(layer.digest, { digest: layer.digest, repository })
+		}
+	}
+	if (manifest.mediaType === MediaType.docker.distribution.manifest.v2) {
+		if (manifest.config) {
+			blobs.set(manifest.config.digest, {
+				digest: manifest.config.digest,
+				repository,
+			})
+		}
+		for (const layer of manifest.layers) {
+			blobs.set(layer.digest, { digest: layer.digest, repository })
+		}
+	}
+}
+
 async function copyBlob<T>(
 	source: DistributionClient,
 	repository: string,
@@ -375,24 +474,20 @@ async function copyBlob<T>(
 }
 
 function createStats<T extends string>(symbols: Record<T, string>) {
-	const counts = new Map<string | symbol, number>(
-		Object.keys(symbols).map((k) => [k, 0]),
+	const keys = new Set<string | symbol>(Object.keys(symbols))
+	const base: Record<string, number> = Object.fromEntries(
+		Object.keys(symbols).map((key) => [key, 0]),
 	)
 
-	return new Proxy({} as Record<T, number>, {
-		get(target, property, reciever) {
-			return (counts.has(property))
-				? counts.get(property) ?? 0
-				: Reflect.get(target, property, reciever)
-		},
-		set(_, property, newValue) {
-			if (!counts.has(property)) return false
+	return new Proxy(base, {
+		set(target, property, newValue) {
+			if (!keys.has(property) || typeof property === 'symbol') return false
 
-			const current = counts.get(property) ?? 0
+			const current = target[property] ?? 0
 			if (newValue > current) print(symbols[property as T] ?? '')
-			counts.set(property, newValue)
+			target[property] = newValue
 
 			return true
 		},
-	})
+	}) as Record<T, number>
 }

@@ -9,6 +9,8 @@
 	},
 	"fmt": {
 		"singleQuote": true,
-		"semiColons": false
+		"semiColons": false,
+		"indentWidth": 2,
+		"useTabs": true
 	}
 }
