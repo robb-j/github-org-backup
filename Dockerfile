@@ -1,4 +1,4 @@
-FROM denoland/deno:alpine-1.46.0
+FROM denoland/deno:alpine-2.4.3
 
 RUN mkdir -p /app/repos && chown -R deno:deno /app \
 	&& apk add --no-cache git openssh
@@ -8,8 +8,9 @@ USER deno
 
 COPY --chown=deno:deno [".", "/app/"]
 
-RUN deno cache main.ts
+RUN deno install --allow-import=esm.r0b.io:443,jsr.io:443
 
 ENV DENO_ENV=production
 
-CMD ["deno", "run", "--allow-env", "--allow-read=.", "--allow-write=repos", "--allow-net=api.github.com:443", "--allow-run=git", "source/main.ts"]
+ENTRYPOINT ["/tini", "--", "docker-entrypoint.sh", "deno", "run", "--allow-import=esm.r0b.io:443,jsr.io:443", "--allow-env", "--allow-read=.", "--allow-write=repos", "--allow-net", "--allow-run=git", "source/main.ts"]
+CMD ["config"]

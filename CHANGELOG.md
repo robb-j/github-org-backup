@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.2.0
+
+- Add "registry" command to back up ghcr.io images
+- (internal) migrated to Deno 2.4.3 from deno 1.46.x
+
+[See changes](https://github.com/robb-j/github-org-backup/compare/v0.1.5...v0.2.0)
+
 ## 0.1.5
 
 - Add "tolerations" to allow some repos to fail

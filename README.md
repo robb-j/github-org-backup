@@ -5,7 +5,7 @@ server. Works well with create-on-push git servers like Gitea & GitLab.
 
 ## Usage
 
-> You'll need [Deno v1](https://docs.deno.com/runtime/) installed to run locally
+> You'll need [Deno v2](https://docs.deno.com/runtime/) installed to run locally
 
 ```bash
 # cd to/this/folder
@@ -14,24 +14,26 @@ git clone git@github.com:robb-j/github-org-backup.git
 
 # Get configuration usage and current values
 # > See the permissions used at the top of the config.ts
-deno task config
+./source/config.ts
 
 # Fill with your configuration
 echo "{}" > app-config.json
 echo "" > .env
 
-# Run the script
+# Run the main script
 # > See the permissions used at the top of the main.ts
-deno task start
+./source/main.ts
 
-# List repos from GitHub
-deno task start --list
+# commands:
+#   repos     backup all git repositories
+#   registry  backup all container images
+#   config    output app configuration and usage
+#   --help    show this help info
 ```
 
 ## Container
 
-The script is also available as a container to run regularly on servers. The
-container will run the script on start up.
+The CLI is also available as a container to run regularly on servers.
 
 You can set the same environment variables and/or mount your configuration at
 `/app/app-config.json` as user `1000:1000`.
@@ -78,7 +80,9 @@ Default:
 
 ## How it works
 
-The script queries the
+### Git repositories
+
+The command queries the
 [GitHub API](https://docs.github.com/en/rest/repos/repos?apiVersion=2022-11-28#list-organization-repositories)
 to find all the repositories that belong to the organisation (`github.org`).
 
@@ -91,6 +95,28 @@ the name of the repo in GitHub.
 
 Finally, the repo is pushed to the new remote. The idea is you can encode the
 username/password in that template, like `https://user:password@example.com`.
+
+### Container registry
+
+The command queries the
+[GitHub API](https://docs.github.com/en/rest/repos/repos?apiVersion=2022-11-28#list-organization-repositories)
+to find all the container packages that belong to the organisation.
+(`github.org`).
+
+> You'll want to create a personal access token (`github.token`) that has
+> permission to do that and also permission to read the repo.
+
+The container list is pruned to only keep the latest patch version of each
+major/minor combination, effecticvely a `major.minor.x` pattern.
+
+Each filtered container is then streamed from ghcr.io to the target registry
+under the same name. It also mounts blobs between registries to avoid
+duplication.
+
+It will skip any container that's manifest is already uploaded.
+
+Once all the layers, config objects and platform-manifests are uploaded to the
+new registry, it uploads the manifest to complete the container.
 
 ## Release
 
