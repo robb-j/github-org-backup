@@ -404,7 +404,7 @@ async function copyManifest(
 
 	// Request the manifest from the source client
 	const res = await source.fetchManifest(repository, reference)
-	if (!res?.body) throw new Error('manifest not found')
+	if (!res.body) throw new Error('manifest not found')
 
 	// Stream the raw manifest to the target client
 	await target.putManifest(repository, reference, manifest.mediaType, res.body)
@@ -473,15 +473,16 @@ async function copyBlob<T>(
 
 	// Request the blob from the source client
 	const res = await source.fetchBlob(repository, desc.digest)
-	if (!res?.body) throw new Error('blob not found')
+	if (!res.body) throw new Error('blob not found')
 
 	// Stream the raw blob to the target client
-	const success = await target.putBlob(
+	await target.putBlobV2(
 		repository,
 		desc,
-		res.body.pipeThrough(new DebugStream(desc.size)),
+		// res.body.pipeThrough(new DebugStream(desc.size)),
+		res.body,
 	)
-	if (!success) throw new Error('failed to upload')
+	// if (!success) throw new Error('failed to upload')
 
 	seen.set(desc.digest, { digest: desc.digest, repository })
 

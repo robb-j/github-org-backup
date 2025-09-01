@@ -162,13 +162,15 @@ export class DistributionClient {
 
 		try {
 			const res = await fetch(request)
-			if (!res.ok && res.status !== 404) {
-				this.debug(
-					'failed status=%o',
-					res.status,
-					res.body ? await res.text() : '',
-				)
-			}
+
+			// if (!res.ok && res.status !== 404) {
+			// 	this.debug(
+			// 		'failed status=%o',
+			// 		res.status,
+			// 		res.body ? await res.text() : '',
+			// 	)
+			// }
+
 			// if (redirectStatuses.has(res.status)) {
 			// 	return this._follow(res, request)
 			// }
@@ -176,7 +178,7 @@ export class DistributionClient {
 			return res
 		} catch (error) {
 			console.error('ApiClient error', error)
-			return null
+			throw new Error('ApiClient error' + error)
 		}
 	}
 
@@ -204,14 +206,14 @@ export class DistributionClient {
 
 	async catalog(): Promise<DistributionCatalog | null> {
 		const res = await this.fetch('./v2/_catalog')
-		return res?.ok ? res.json() : null
+		return res.ok ? res.json() : null
 	}
 
 	// https://distribution.github.io/distribution/spec/api/#listing-image-tags
 
 	async listTags(repository: string): Promise<DistributionTag | null> {
 		const res = await this.fetch(`./v2/${repository}/tags/list`)
-		return res?.ok ? res.json() : null
+		return res.ok ? res.json() : null
 	}
 
 	// https://distribution.github.io/distribution/spec/api/#pulling-an-image-manifest
@@ -232,7 +234,7 @@ export class DistributionClient {
 		tag: string,
 	): Promise<DistributionManifest | null> {
 		const res = await this.fetchManifest(repository, tag)
-		return res?.ok ? res.json() : null
+		return res.ok ? res.json() : null
 	}
 
 	async headManifest(
@@ -244,7 +246,7 @@ export class DistributionClient {
 		})
 		// if (res?.ok) console.log(res)
 
-		return res?.ok ?? false
+		return res.ok ?? false
 	}
 
 	// https://distribution.github.io/distribution/spec/api/#pushing-an-image-manifest
@@ -281,7 +283,7 @@ export class DistributionClient {
 		digest: string,
 	) {
 		const res = await this.fetchBlob(repository, digest)
-		return res?.ok ? res.body : null
+		return res.ok ? res.body : null
 	}
 
 	async getJsonBlob(
@@ -289,7 +291,7 @@ export class DistributionClient {
 		digest: string,
 	) {
 		const res = await this.fetchBlob(repository, digest)
-		return res?.ok ? res.json() : null
+		return res.ok ? res.json() : null
 	}
 
 	async headBlob(
@@ -300,7 +302,7 @@ export class DistributionClient {
 			method: 'HEAD',
 		})
 		// if (res?.ok) console.log(res)
-		return res?.ok ?? null
+		return res.ok ?? null
 	}
 
 	// https://distribution.github.io/distribution/spec/api/#monolithic-upload
@@ -315,7 +317,7 @@ export class DistributionClient {
 		const start = await this.fetch(`./v2/${repository}/blobs/uploads/`, {
 			method: 'POST',
 		})
-		if (!start?.ok) throw new Error('cannot upload')
+		if (!start.ok) throw new Error('cannot upload')
 
 		// ~ /v2/<name>/blobs/uploads/<uuid>
 		const location = this.resolve(start.headers.get('location')!)
@@ -329,7 +331,103 @@ export class DistributionClient {
 			},
 			body,
 		})
-		return upload?.ok ?? false
+		return upload.ok
+	}
+
+	async putBlobV2(
+		repository: string,
+		{ digest, size }: OciDescriptorV1,
+		body: ReadableStream<Uint8Array>,
+	) {
+		// const head = await this.headBlob(repository, digest)
+		// if (head) return
+
+		// Start the upload and get an uuid to send to
+		// https://distribution.github.io/distribution/spec/api/#starting-an-upload
+		const start = await this.fetch(`./v2/${repository}/blobs/uploads/`, {
+			method: 'POST',
+			headers: {
+				'Content-Length': '0',
+			},
+		})
+		if (start.status !== 202) throw new Error('failed to start upload')
+
+		// https://distribution.github.io/distribution/spec/api/#uploading-the-layer
+		let location = this.resolve(start.headers.get('Location')!)
+
+		const minChunkSize = 1_024 * 1_024
+
+		let offset = 0
+		let buffer = new Uint8Array()
+
+		// Loop through each chunk of the body
+		for await (const chunk of body) {
+			// Merge the chunk into previous failed attempts
+			buffer = mergeBytes(buffer, chunk)
+
+			if (buffer.byteLength < minChunkSize) continue
+
+			// Upload the chunk
+			// https://distribution.github.io/distribution/spec/api/#chunked-upload
+			this.debug(
+				'upload %d-%d / %d',
+				offset,
+				offset + buffer.byteLength - 1,
+				size,
+			)
+			const upload = await this.fetch(
+				location,
+				{
+					method: 'PATCH',
+					body: buffer,
+					headers: {
+						'Content-Length': `${buffer.byteLength}`,
+						'Content-Range': `${offset}-${offset + buffer.byteLength - 1}`,
+						'Content-Type': 'application/octet-stream',
+					},
+				},
+			)
+
+			if (upload.status === 416) {
+				this.debug('upload - 416 too small')
+				// this indicates the chunk was too small
+				// TODO: get "offset" from the Range header
+				// offset = parseInt(upload.headers.get('Range')!.split('-')[1])
+				continue
+			}
+
+			if (!upload.ok) {
+				console.error('Upload error', await upload.text())
+				throw new Error('Upload failed')
+			}
+
+			location = this.resolve(upload.headers.get('Location')!)
+
+			offset += buffer.byteLength
+			buffer = new Uint8Array()
+		}
+
+		// if (buffer.byteLength > 0) throw new Error('Something went wrong')
+
+		// Complete the upload & send remaining bytes
+		// https://distribution.github.io/distribution/spec/api/#completed-upload
+		const completeUrl = new URL(location)
+		completeUrl.searchParams.set('digest', digest)
+
+		const complete = await this.fetch(completeUrl, {
+			method: 'PUT',
+			body: buffer,
+			headers: {
+				'Content-Length': `${buffer.byteLength}`,
+				'Content-Range': `${offset}-${offset + buffer.byteLength - 1}`,
+				'Content-Type': 'application/octet-stream',
+			},
+		})
+
+		if (complete.status !== 201) {
+			console.error('Upload error', await complete.text())
+			throw Error('Failed to upload blob')
+		}
 	}
 
 	async mountBlob(
@@ -347,7 +445,7 @@ export class DistributionClient {
 				'Content-Length': '0',
 			},
 		})
-		return res?.ok ?? false
+		return res.ok ?? false
 	}
 
 	resolve(urlOrPath: string) {
@@ -366,4 +464,17 @@ export function stubDistributionClient(): DistributionClient {
 			}
 		},
 	})
+}
+
+// https://stackoverflow.com/questions/49129643/how-do-i-merge-an-array-of-uint8arrays
+function mergeBytes(...arrays: Uint8Array[]) {
+	const output = new Uint8Array(
+		arrays.reduce((sum, arr) => sum + arr.byteLength, 0),
+	)
+	let offset = 0
+	for (const arr of arrays) {
+		output.set(arr, offset)
+		offset += arr.byteLength
+	}
+	return output
 }
